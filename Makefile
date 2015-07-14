@@ -4,7 +4,7 @@
 
 DESTDIR = /usr/local
 
-name = ytdl
+name = ytcl
 bin = $(name)
 zip = $(name).zip
 pyo = $(patsubst %.py, %.pyo, $(shell find src -name '*.py'))

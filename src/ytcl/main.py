@@ -57,7 +57,7 @@ class Main(object):
     Notify user with message via both OS notifications, if available, as
     well as standard out.
     '''
-    if notify is not None: notify(self.prog(),'clip listen',msg)
+    if notify is not None: notify(self.prog,'clip listen',msg)
     print msg
 
   def popen(self, wait):

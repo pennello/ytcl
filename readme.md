@@ -28,4 +28,8 @@ respectively.  OS X is currently the only supported platform, but the
 modules are written in such a way so as to make adding support for
 platforms straight-forward.
 
+History
+-------
+`ytcl` is the extraction of a sub-feature of `ytdl`.
+
 [1]: http://rg3.github.io/youtube-dl/

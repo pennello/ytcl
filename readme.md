@@ -1,3 +1,5 @@
+Summary
+-------
 `ytcl` watches the clipboard for YouTube video URLs, and automatically
 downloads them to the current working directory.
 

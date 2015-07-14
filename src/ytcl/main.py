@@ -9,16 +9,20 @@ functionality is not available, then just output user notifications to
 standard out instead of both that as well as OS notifications.
 '''
 
-import time
+import os
 import subprocess
-try: from .. import clipboard
-except ImportError: clipboard = None
-try: from ..notify import notify
-except ImportError: notify = None
-from .. import youtubedl
-from .bases import Group,Error
+import sys
+import time
+from argparse import ArgumentParser
 
-class Clip(Group):
+try: from . import clipboard
+except ImportError: clipboard = None
+try: from .notify import notify
+except ImportError: notify = None
+
+from . import youtubedl
+
+class Main(object):
   # These are in seconds.
   thresh = 10 # Minimum time after which to start youtube-dl.
   period = .2 # Period with which to poll clipboard.
@@ -33,15 +37,15 @@ class Clip(Group):
     '''Check whether given string matches any of the pattern strings.'''
     return any(p in x for p in cls.patterns)
 
-  def parse(self,cmdgrp):
-    descr = 'Clipboard functionality. Not available on all platforms.'
-    clip = cmdgrp.add_parser('clip',description=descr,help=descr)
-    clip_commands = clip.add_subparsers(dest='command',metavar='command')
+  def __init__(self,prog,*argv):
+    self.prog = os.path.basename(prog)
     descr = ('Listen for YouTube URLs, launch youtube-dl (roughly) on-demand, '
       'and download videos to current working directory.  If available, will '
       'trigger OS graphical notifications when new URLs are found and when '
       'youtube-dl is invoked.')
-    listen = clip_commands.add_parser('listen',description=descr,help=descr)
+    parser = ArgumentParser(self.prog,description=descr)
+    parser.parse_args(argv)
+    # No actual argument parsing, but we do provide a nice help message.
 
   def reset(self):
     '''Reset internal state after launching youtube-dl.'''
@@ -53,8 +57,8 @@ class Clip(Group):
     Notify user with message via both OS notifications, if available, as
     well as standard out.
     '''
-    if notify is not None: notify(self.prog(),'clip listen',msg)
-    self.out(msg)
+    if notify is not None: notify(self.prog,'clip listen',msg)
+    print msg
 
   def popen(self, wait):
     '''Launch youtube-dl.'''
@@ -85,13 +89,18 @@ class Clip(Group):
     '''Sleep for the period.'''
     time.sleep(self.period)
 
-  def listen(self,args):
+  def error(self,x):
+    sys.stderr.write('%s: %s\n' % (self.prog,x))
+    sys.stderr.flush()
+    sys.exit(1)
+
+  def run(self):
     '''
     Launch youtube-dl soon after last paste, but not so soon as to
     preclude batching a group of pastes into a single youtube-dl call.
     '''
     if clipboard is None:
-      raise Error(1,'clipboard unavailable on this platform')
+      self.error('clipboard unavailable on this platform')
     self.reset()
     self.last = clipboard.paste()
     try:
@@ -99,5 +108,5 @@ class Clip(Group):
         self.poll()
         self.sleep()
     except KeyboardInterrupt:
-      self.out() # Make line break after ^C on-screen.
+      print # Make line break after ^C on-screen.
       if self.data: self.popen(True)

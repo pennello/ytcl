@@ -15,8 +15,8 @@ The `Makefile` supports `DESTDIR`.
 
 Documentation
 -------------
-Simply run `ytcl`.  In addition, most of the classes and methods have
-Pydoc documentation.
+Run `ytcl --help` to get started.  In addition, most of the classes and
+methods have Pydoc documentation.
 
 Cross-Platform Support
 ----------------------

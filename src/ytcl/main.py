@@ -1,126 +1,103 @@
-# chris 032515
+# chris 032615
 
+'''Clipboard command group.
+
+Attempts to import clipboard and notify modules.  If imports fail, the
+functionality is not available.  If clipboard functionality is not
+available, clip listen command will not work.  If notification
+functionality is not available, then just output user notifications to
+standard out instead of both that as well as OS notifications.
 '''
-Package-relative entry point.
 
-An instance of Main is constructed by __main__ (in the parent
-directory), and its run method is invoked.
-'''
+import time
+import subprocess
+try: from .. import clipboard
+except ImportError: clipboard = None
+try: from ..notify import notify
+except ImportError: notify = None
+from .. import youtubedl
+from .bases import Group,Error
 
-import errno
-import os.path
+class Clip(Group):
+  # These are in seconds.
+  thresh = 10 # Minimum time after which to start youtube-dl.
+  period = .2 # Period with which to poll clipboard.
 
-from ConfigParser import ConfigParser
-from argparse import ArgumentParser
-from collections import OrderedDict
+  patterns = (
+    'youtu.be/',
+    'youtube.com/watch?v=',
+  )
 
-from . import client,groups,ssl,util
-from .error import Error
-from .subs import Db
+  @classmethod
+  def match(cls,x):
+    '''Check whether given string matches any of the pattern strings.'''
+    return any(p in x for p in cls.patterns)
 
-class Main(object):
-  '''
-  A single instance of the Main class serves as a context for the
-  application.  When constructed, it loads the configuration, constructs
-  and initializes an instance of the subscription database interface,
-  constructs the command group interfaces, kicks off the command-line
-  parsing, and constructs an instance of the YouTube API client.
+  def parse(self,cmdgrp):
+    descr = 'Clipboard functionality. Not available on all platforms.'
+    clip = cmdgrp.add_parser('clip',description=descr,help=descr)
+    clip_commands = clip.add_subparsers(dest='command',metavar='command')
+    descr = ('Listen for YouTube URLs, launch youtube-dl (roughly) on-demand, '
+      'and download videos to current working directory.  If available, will '
+      'trigger OS graphical notifications when new URLs are found and when '
+      'youtube-dl is invoked.')
+    listen = clip_commands.add_parser('listen',description=descr,help=descr)
 
-  Its run method locates and runs the command specified on the
-  command-line.
-  '''
+  def reset(self):
+    '''Reset internal state after launching youtube-dl.'''
+    self.data = ()    # Will store content from the clipboard.
+    self.stamp = None # Time of the most recent data addition.
 
-  def __init__(self,prog,*argv):
-    self.prog = os.path.basename(prog)
-    self.conf = self.makeconf()
-    self.db = Db(self)
-    self.db.init()
-    self.groups = OrderedDict(
-      id  =groups.Id(self),
-      subs=groups.Subs(self),
-      clip=groups.Clip(self),
-      cron=groups.Cron(self),
-    )
-    self.args = self.parse(argv)
-
-  def basepath(self):
+  def notify(self,msg):
     '''
-    Base path used by all other runtime paths.  Uses user's home
-    directory.
+    Notify user with message via both OS notifications, if available, as
+    well as standard out.
     '''
-    return os.path.expanduser('~')
-  def path(self,*path):
-    '''Return path joined with base path.'''
-    return os.path.join(self.basepath(),*path)
-  def dbpath(self,*path):
-    '''Return path joined with namespaced db path.'''
-    return self.path('var','db',self.prog,*path)
-  def logpath(self,*path):
-    '''Return path joined with namespaced log path.'''
-    return self.path('var','log',self.prog,*path)
+    if notify is not None: notify(self.prog(),'clip listen',msg)
+    self.out(msg)
 
-  def confpath(self):
-    '''Return config path.'''
-    return self.path('etc','%s.conf' % self.prog)
-  def makeconf(self):
+  def popen(self, wait):
+    '''Launch youtube-dl.'''
+    args = youtubedl.args(self.data)
+    self.notify('invoking %s' % args[0])
+    p = subprocess.Popen(args)
+    if wait: p.wait()
+
+  def check(self):
+    '''Return whether we should launch youtube-dl.'''
+    return (self.stamp is not None and
+      self.data and time.time() > self.stamp + self.thresh)
+
+  def poll(self):
+    '''Poll clipboard for new data, potentially launch youtube-dl.'''
+    x = clipboard.paste()
+    if x != self.last:
+      self.last = x
+      if self.match(x):
+        self.stamp = time.time()
+        self.data += x,
+        self.notify('got %s' % x)
+    if self.check():
+      self.popen(False)
+      self.reset()
+
+  def sleep(self):
+    '''Sleep for the period.'''
+    time.sleep(self.period)
+
+  def listen(self,args):
     '''
-    Make and return ConfigParser instance with parsed configuration
-    information from the config file.  Return None if no config found.
+    Launch youtube-dl soon after last paste, but not so soon as to
+    preclude batching a group of pastes into a single youtube-dl call.
     '''
-    conf = ConfigParser()
+    if clipboard is None:
+      raise Error(1,'clipboard unavailable on this platform')
+    self.reset()
+    self.last = clipboard.paste()
     try:
-      with open(self.confpath(),'rb') as f:
-        conf.readfp(f)
-    except IOError,e:
-      if e.errno != errno.ENOENT: raise
-      return None
-    return conf
-  def key(self):
-    '''Return auth key from config.  Return None if no config.'''
-    if self.conf is None: return None
-    return self.conf.get('auth','key')
-
-  def client(self):
-    '''
-    Dynamically construct client instance from auth key.  Error if no
-    key available.
-    '''
-    key = self.key()
-    if key is None: raise Error(3,'no api key (set up conf first)')
-    return client.Client(key)
-
-  def parse(self,argv):
-    '''
-    Parse command-line arguments.  Relies on command groups to add their
-    own commands to the main command group subparser.
-    '''
-    descr = 'YouTube download manager.'
-    parser = ArgumentParser(self.prog,description=descr)
-    parser.add_argument('-v','--verbose',action='store_true',default=False,
-      help='enable verbose logging to standard error')
-    cmdgrp = parser.add_subparsers(dest='group',metavar='command_group')
-    for group in self.groups.itervalues(): group.parse(cmdgrp)
-    return parser.parse_args(argv)
-
-  def log(self,x):
-    '''Log object to standard error if verbose mode is enabled.'''
-    if self.args.verbose: util.log(x)
-  def error(self,x):
-    '''Log object to standard error with error prefix.'''
-    util.log('error: %s' % x)
-
-  def run(self):
-    '''Locate and runs the command specified on the command-line.'''
-    if ssl.needshack(): ssl.noverify()
-    group = self.groups[self.args.group]
-    if self.args.command == 'import':
-      self.args.command = 'import_' # Hacky, hacky.
-    command = getattr(group,self.args.command)
-    try: command(self.args)
-    except Error,e:
-      self.error(e.msg)
-      return e.code
+      while True:
+        self.poll()
+        self.sleep()
     except KeyboardInterrupt:
-      self.error('caught interrupt')
-      return 1
-    return 0
+      self.out() # Make line break after ^C on-screen.
+      if self.data: self.popen(True)

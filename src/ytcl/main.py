@@ -80,7 +80,7 @@ class Main(object):
       if self.match(x):
         self.stamp = time.time()
         self.data += x,
-        self.notify('got %s' % x)
+        self.notify(x)
     if self.check():
       self.popen(False)
       self.reset()
